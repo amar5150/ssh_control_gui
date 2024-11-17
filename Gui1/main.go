@@ -6,12 +6,16 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
+	"github.com/wcharczuk/go-chart/v2"
+	"github.com/wcharczuk/go-chart/v2/drawing"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -78,11 +82,9 @@ func main() {
 	scripts := []string{"ls -l", "uname -a", "df -h"}
 	scriptSelect := widget.NewSelect(scripts, nil)
 
-	// Dynamic arguments container
 	argumentsContainer := container.NewVBox()
 	argumentEntries := []*widget.Entry{}
 
-	// Function to add a new argument field
 	addArgumentField := func() {
 		argIndex := len(argumentEntries) + 1
 		label := widget.NewLabel(fmt.Sprintf("Argument %d:", argIndex))
@@ -93,7 +95,6 @@ func main() {
 		argumentEntries = append(argumentEntries, entry)
 	}
 
-	// Add the first argument field by default
 	addArgumentField()
 
 	addArgumentButton := widget.NewButton("Add Argument", func() {
@@ -116,7 +117,6 @@ func main() {
 			return
 		}
 
-		// Collect all arguments
 		var arguments []string
 		for _, entry := range argumentEntries {
 			if entry.Text != "" {
@@ -155,6 +155,79 @@ func main() {
 		output,
 	)
 
+	// Response Parsing and Plotting Panel
+	responseEntry := widget.NewMultiLineEntry()
+	responseEntry.SetPlaceHolder("Enter response to parse (or paste output from the SSH panel)...")
+
+	parsedOutput := widget.NewMultiLineEntry()
+	parsedOutput.SetPlaceHolder("Parsed output will appear here...")
+	parsedOutput.Disable()
+
+	chartContainer := container.NewVBox()
+	plotButton := widget.NewButton("Parse and Plot", func() {
+		rawData := responseEntry.Text
+		if rawData == "" {
+			parsedOutput.SetText("No response provided.")
+			return
+		}
+
+		// Example: Assume CSV-like data (e.g., "1,2,3\n4,5,6")
+		lines := strings.Split(rawData, "\n")
+		var xVals, yVals []float64
+		for _, line := range lines {
+			parts := strings.Split(line, ",")
+			if len(parts) >= 2 {
+				x, err1 := strconv.ParseFloat(parts[0], 64)
+				y, err2 := strconv.ParseFloat(parts[1], 64)
+				if err1 == nil && err2 == nil {
+					xVals = append(xVals, x)
+					yVals = append(yVals, y)
+				}
+			}
+		}
+
+		if len(xVals) == 0 || len(yVals) == 0 {
+			parsedOutput.SetText("No valid data found for plotting.")
+			return
+		}
+
+		// Generate a simple chart
+		graph := chart.Chart{
+			Series: []chart.Series{
+				chart.ContinuousSeries{
+					Style: chart.Style{
+						StrokeColor: drawing.ColorRed,
+						StrokeWidth: 2.0,
+					},
+					XValues: xVals,
+					YValues: yVals,
+				},
+			},
+		}
+
+		// Render the chart as an image
+		buffer := bytes.NewBuffer([]byte{})
+		err := graph.Render(chart.PNG, buffer)
+		if err != nil {
+			parsedOutput.SetText(fmt.Sprintf("Error rendering chart: %v", err))
+			return
+		}
+
+		// Display chart in GUI
+		chartImage := canvas.NewImageFromReader(buffer, "chart.png")
+		chartContainer.Objects = []fyne.CanvasObject{chartImage}
+		chartContainer.Refresh()
+	})
+
+	plotPanel := container.NewVBox(
+		widget.NewLabel("Response Parsing and Plotting"),
+		widget.NewLabel("Paste the response (e.g., CSV data):"),
+		responseEntry,
+		plotButton,
+		parsedOutput,
+		chartContainer,
+	)
+
 	// JSON Generator Panel (unchanged)
 	jsonEntries := make(map[string]*widget.Entry)
 	fieldForm := container.NewVBox()
@@ -166,7 +239,6 @@ func main() {
 		fieldValueEntry := widget.NewEntry()
 		fieldValueEntry.SetPlaceHolder("Field Value")
 
-		// Add to form and update entries map
 		fieldForm.Add(container.NewHBox(fieldKeyEntry, fieldValueEntry))
 		jsonEntries[fieldKeyEntry.Text] = fieldValueEntry
 	})
@@ -175,7 +247,7 @@ func main() {
 		data := make(map[string]string)
 		for key, entry := range jsonEntries {
 			if key == "" || entry.Text == "" {
-				continue // Skip empty fields
+				continue
 			}
 			data[key] = entry.Text
 		}
@@ -208,10 +280,11 @@ func main() {
 	// Tab container
 	tabs := container.NewAppTabs(
 		container.NewTabItem("SSH Script Runner", sshPanel),
+		container.NewTabItem("Response Parsing & Plotting", plotPanel),
 		container.NewTabItem("JSON Generator", jsonPanel),
 	)
 
 	myWindow.SetContent(tabs)
-	myWindow.Resize(fyne.NewSize(500, 500))
+	myWindow.Resize(fyne.NewSize(800, 600))
 	myWindow.ShowAndRun()
 }
