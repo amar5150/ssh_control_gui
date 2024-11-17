@@ -23,6 +23,5 @@ go.work.sum
 
 # env file
 .env
-Gui1/main
 Gui1/go.mod
 Gui1/go.sum
